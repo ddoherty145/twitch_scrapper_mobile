@@ -2,15 +2,11 @@ import React from 'react';
 import { View, Text } from 'react-native';
 import { createDrawerNavigator } from '@react-navigation/drawer';
 import HomeScreen from '../screens/homeScreen';
+import GamesScreen from '../screens/gameScreen';
 
 const Drawer = createDrawerNavigator();
 
 // Temporary placeholder implementations so TypeScript and navigation compile.
-const GamesStackNavigator: React.FC = () => (
-  <View>
-    <Text>Games</Text>
-  </View>
-);
 const HighlightsStackNavigator: React.FC = () => (
   <View>
     <Text>Highlights</Text>
@@ -34,7 +30,7 @@ const AppNavigator: React.FC = () => {
       }}
     >
       <Drawer.Screen name="Home" component={HomeScreen} />
-      <Drawer.Screen name="Games" component={GamesStackNavigator} />
+      <Drawer.Screen name="Games" component={GamesScreen} />
       <Drawer.Screen name="Highlights" component={HighlightsStackNavigator} />
       <Drawer.Screen name="About" component={AboutScreen} />
     </Drawer.Navigator>
