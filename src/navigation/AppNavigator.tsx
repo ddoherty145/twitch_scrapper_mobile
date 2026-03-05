@@ -1,4 +1,28 @@
-return (
+import React from 'react';
+import { View, Text } from 'react-native';
+import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
+
+type TabIconProps = {
+  label: string;
+  focused: boolean;
+};
+
+const Tab = createBottomTabNavigator();
+
+// Temporary placeholder implementations so TypeScript and navigation compile.
+const TabIcon: React.FC<TabIconProps> = ({ label, focused }) => (
+  <View>
+    <Text>{label}</Text>
+  </View>
+);
+
+const HomeStackNavigator: React.FC = () => <View />;
+const GamesStackNavigator: React.FC = () => <View />;
+const HighlightsStackNavigator: React.FC = () => <View />;
+const AboutScreen: React.FC = () => <View />;
+
+const AppNavigator: React.FC = () => {
+  return (
     <Tab.Navigator
       screenOptions={({ route }) => ({
         headerShown: false,
@@ -27,4 +51,6 @@ return (
       <Tab.Screen name="About" component={AboutScreen} />
     </Tab.Navigator>
   );
-}
+};
+
+export default AppNavigator;
