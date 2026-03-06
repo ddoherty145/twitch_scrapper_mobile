@@ -3,6 +3,7 @@ import { View, Text } from 'react-native';
 import { createDrawerNavigator } from '@react-navigation/drawer';
 import HomeScreen from '../screens/homeScreen';
 import GamesScreen from '../screens/gameScreen';
+import ClipDetailScreen from '../screens/clipDataScreen';
 
 const Drawer = createDrawerNavigator();
 
@@ -31,6 +32,7 @@ const AppNavigator: React.FC = () => {
     >
       <Drawer.Screen name="Home" component={HomeScreen} />
       <Drawer.Screen name="Games" component={GamesScreen} />
+      <Drawer.Screen name="ClipDetail" component={ClipDetailScreen} />
       <Drawer.Screen name="Highlights" component={HighlightsStackNavigator} />
       <Drawer.Screen name="About" component={AboutScreen} />
     </Drawer.Navigator>

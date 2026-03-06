@@ -1,45 +1,71 @@
-import React, { useRef } from 'react';
+import React, { useState } from 'react';
 import {
   View,
   Text,
   StyleSheet,
   TouchableOpacity,
-  ScrollView,
-  Share,
-  Linking,
+  ActivityIndicator,
   Alert,
+  FlatList,
+  RefreshControl,
 } from 'react-native';
-import { WebView } from 'react-native-webview';
 import { useAppDispatch, useAppSelector } from '../hooks/useAppDispatch';
-import { toggleFavorite, Clip } from '../store/clipSlice';
+import { startTopClipsScrape, fetchJobClips, Clip } from '../store/clipSlice';
 import { colors, spacing, typography, borderRadius } from '../theme/theme_index';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { getJobStatus } from '../services/api';
 
-type ClipDetailScreenProps = {
-  route?: {
-    params?: {
-      clip: Clip;
-    };
-  };
-};
-
-export default function ClipDetailScreen({ route }: ClipDetailScreenProps) {
-  const clip = route?.params?.clip;
-
-  if (!clip) {
-    return (
-      <View style={[styles.container, { justifyContent: 'center', alignItems: 'center', backgroundColor: colors.light.background }]}>
-        <Text style={[styles.title, { color: colors.light.text }]}>
-          No clip selected yet
-        </Text>
-      </View>
-    );
-  }
+export default function HomeScreen({ navigation }: any) {
   const dispatch = useAppDispatch();
   const darkMode = useAppSelector(s => s.settings.darkMode);
-  const favorites = useAppSelector(s => s.clips.favorites);
+  const { scraping } = useAppSelector(s => s.clips);
   const theme = darkMode ? colors.dark : colors.light;
-  const isFavorited = favorites.some(f => f.id === clip.id);
+
+  const [clips, setClips] = useState<Clip[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+
+  const pollJobUntilDone = async (jobId: number): Promise<any> => {
+    return new Promise((resolve, reject) => {
+      const interval = setInterval(async () => {
+        try {
+          const job = await getJobStatus(jobId);
+          if (job.status === 'completed') {
+            clearInterval(interval);
+            resolve(job);
+          } else if (job.status === 'failed') {
+            clearInterval(interval);
+            reject(new Error(job.error || 'Job failed'));
+          }
+        } catch (e) {
+          clearInterval(interval);
+          reject(e);
+        }
+      }, 2000);
+    });
+  };
+
+  const handleFetchTopClips = async () => {
+    setLoading(true);
+    setClips([]);
+    try {
+      const result = await dispatch(
+        startTopClipsScrape({ days_back: 1, limit: 75, english_only: true })
+      ).unwrap();
+      await pollJobUntilDone(result.job_id);
+      const fetched = await dispatch(fetchJobClips(result.job_id)).unwrap();
+      setClips(fetched);
+    } catch (e: any) {
+      Alert.alert('Error', e.message || 'Failed to fetch clips');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleRefresh = async () => {
+    setRefreshing(true);
+    await handleFetchTopClips();
+    setRefreshing(false);
+  };
 
   const formatViews = (views: number) => {
     if (views >= 1000000) return `${(views / 1000000).toFixed(1)}M`;
@@ -53,146 +79,162 @@ export default function ClipDetailScreen({ route }: ClipDetailScreenProps) {
     return `${mins}:${secs.toString().padStart(2, '0')}`;
   };
 
-  const handleShare = async () => {
-    try {
-      await Share.share({
-        message: `Check out this clip: ${clip.title}\n${clip.url}`,
-        url: clip.url,
-        title: clip.title,
-      });
-    } catch (e) {
-      Alert.alert('Error', 'Could not share clip');
-    }
-  };
-
-  const handleFavorite = async () => {
-    dispatch(toggleFavorite(clip));
-    // Persist to AsyncStorage
-    try {
-      const updatedFavorites = isFavorited
-        ? favorites.filter(f => f.id !== clip.id)
-        : [...favorites, clip];
-      await AsyncStorage.setItem('favorites', JSON.stringify(updatedFavorites));
-    } catch (e) {
-      console.warn('Failed to save favorites');
-    }
-  };
-
-  const handleOpenTwitch = () => {
-    Linking.openURL(clip.url);
-  };
-
-  // Build embed URL with parent param required by Twitch
-  const embedUrl = clip.embed_url
-    ? `${clip.embed_url}&parent=localhost`
-    : `https://clips.twitch.tv/embed?clip=${clip.id}&parent=localhost`;
-
   return (
-    <ScrollView style={[styles.container, { backgroundColor: theme.background }]}>
-      {/* Video Player */}
-      <View style={styles.playerContainer}>
-        <WebView
-          source={{ uri: embedUrl }}
-          style={styles.player}
-          allowsFullscreenVideo
-          mediaPlaybackRequiresUserAction={false}
-          onError={() => console.log('WebView error')}
-        />
-      </View>
-
-      {/* Clip Info */}
-      <View style={[styles.infoBox, { backgroundColor: theme.card, borderColor: theme.border }]}>
-        <Text style={[styles.title, { color: theme.text }]}>{clip.title}</Text>
-
-        <View style={styles.metaRow}>
-          <Text style={[styles.meta, { color: theme.subtext }]}>📺 {clip.broadcaster_name}</Text>
-          <Text style={[styles.meta, { color: theme.subtext }]}>🎮 {clip.game_name}</Text>
-        </View>
-
-        <View style={styles.statsRow}>
-          <View style={[styles.statChip, { backgroundColor: theme.tertiary }]}>
-            <Text style={[styles.statText, { color: theme.text }]}>👀 {formatViews(clip.view_count)} views</Text>
-          </View>
-          <View style={[styles.statChip, { backgroundColor: theme.tertiary }]}>
-            <Text style={[styles.statText, { color: theme.text }]}>⏱ {formatDuration(clip.duration)}</Text>
-          </View>
-        </View>
-
-        <Text style={[styles.creator, { color: theme.subtext }]}>
-          Clipped by {clip.creator_name}
+    <View style={[styles.container, { backgroundColor: theme.background }]}>
+      {/* Header / Fetch Button */}
+      <View style={[styles.headerBox, { backgroundColor: theme.card, borderColor: theme.border }]}>
+        <Text style={[styles.headline, { color: theme.text }]}>Top Clips</Text>
+        <Text style={[styles.subtitle, { color: theme.subtext }]}>
+          Trending across Twitch in the last 24 hours
         </Text>
+        <TouchableOpacity
+          onPress={handleFetchTopClips}
+          disabled={loading || scraping}
+          style={[
+            styles.fetchButton,
+            { backgroundColor: theme.secondary },
+            (loading || scraping) && styles.fetchButtonDisabled,
+          ]}
+        >
+          {loading ? (
+            <View style={styles.row}>
+              <ActivityIndicator color="#fff" size="small" />
+              <Text style={styles.fetchButtonText}>  Fetching clips...</Text>
+            </View>
+          ) : (
+            <Text style={styles.fetchButtonText}>▶  Get Top 75 Clips (Last 24h)</Text>
+          )}
+        </TouchableOpacity>
       </View>
 
-      {/* Action Buttons */}
-      <View style={styles.actions}>
-        <TouchableOpacity
-          onPress={handleFavorite}
-          style={[styles.actionButton, { backgroundColor: isFavorited ? '#f59e0b' : theme.card, borderColor: theme.border }]}
-        >
-          <Text style={styles.actionEmoji}>{isFavorited ? '★' : '☆'}</Text>
-          <Text style={[styles.actionLabel, { color: isFavorited ? '#ffffff' : theme.text }]}>
-            {isFavorited ? 'Saved' : 'Save'}
+      {/* Clips list */}
+      {clips.length > 0 ? (
+        <FlatList
+          data={clips}
+          keyExtractor={(item, index) => `${item.id}-${index}`}
+          contentContainerStyle={styles.clipsList}
+          refreshControl={
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={handleRefresh}
+              tintColor={theme.secondary}
+            />
+          }
+          ListHeaderComponent={
+            <Text style={[styles.resultsLabel, { color: theme.subtext }]}>
+              {clips.length} clips from the last 24 hours
+            </Text>
+          }
+          renderItem={({ item, index }) => (
+            <TouchableOpacity
+              onPress={() => navigation.navigate('ClipDetail', { clip: item })}
+              style={[styles.clipCard, { backgroundColor: theme.card, borderColor: theme.border }]}
+            >
+              <View style={styles.clipRank}>
+                <Text style={[styles.rankText, { color: theme.secondary }]}>#{index + 1}</Text>
+              </View>
+              <View style={styles.clipInfo}>
+                <Text style={[styles.clipTitle, { color: theme.text }]} numberOfLines={2}>
+                  {item.title}
+                </Text>
+                <Text style={[styles.clipMeta, { color: theme.subtext }]}>
+                  📺 {item.broadcaster_name}  🎮 {item.game_name}
+                </Text>
+                <View style={styles.clipStats}>
+                  <Text style={[styles.statBadge, { backgroundColor: theme.tertiary, color: theme.text }]}>
+                    👀 {formatViews(item.view_count)}
+                  </Text>
+                  <Text style={[styles.statBadge, { backgroundColor: theme.tertiary, color: theme.text }]}>
+                    ⏱ {formatDuration(item.duration)}
+                  </Text>
+                </View>
+              </View>
+              <Text style={[styles.chevron, { color: theme.subtext }]}>›</Text>
+            </TouchableOpacity>
+          )}
+        />
+      ) : !loading ? (
+        <View style={styles.emptyState}>
+          <Text style={styles.emptyEmoji}>🎬</Text>
+          <Text style={[styles.emptyTitle, { color: theme.text }]}>No clips loaded yet</Text>
+          <Text style={[styles.emptySubtitle, { color: theme.subtext }]}>
+            Tap the button above to fetch the top 75 clips from the last 24 hours
           </Text>
-        </TouchableOpacity>
+        </View>
+      ) : null}
 
-        <TouchableOpacity
-          onPress={handleShare}
-          style={[styles.actionButton, { backgroundColor: theme.secondary, borderColor: theme.secondary }]}
-        >
-          <Text style={styles.actionEmoji}>↑</Text>
-          <Text style={[styles.actionLabel, { color: '#ffffff' }]}>Share</Text>
-        </TouchableOpacity>
-
-        <TouchableOpacity
-          onPress={handleOpenTwitch}
-          style={[styles.actionButton, { backgroundColor: theme.card, borderColor: theme.border }]}
-        >
-          <Text style={styles.actionEmoji}>🔗</Text>
-          <Text style={[styles.actionLabel, { color: theme.text }]}>Twitch</Text>
-        </TouchableOpacity>
-      </View>
-    </ScrollView>
+      {loading && (
+        <View style={styles.loadingState}>
+          <ActivityIndicator size="large" color={theme.secondary} />
+          <Text style={[styles.loadingText, { color: theme.text }]}>
+            Fetching top clips from Twitch...
+          </Text>
+          <Text style={[styles.loadingSubtext, { color: theme.subtext }]}>
+            This may take 30–60 seconds
+          </Text>
+        </View>
+      )}
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
-  playerContainer: {
-    width: '100%',
-    aspectRatio: 16 / 9,
-    backgroundColor: '#000',
-  },
-  player: { flex: 1 },
-  infoBox: {
+  headerBox: {
     margin: spacing.md,
     padding: spacing.md,
     borderRadius: borderRadius.lg,
     borderWidth: 1,
   },
-  title: { ...typography.h3, marginBottom: spacing.sm },
-  metaRow: { flexDirection: 'row', gap: spacing.md, marginBottom: spacing.sm },
-  meta: { ...typography.small },
-  statsRow: { flexDirection: 'row', gap: spacing.sm, marginBottom: spacing.sm },
-  statChip: {
-    paddingHorizontal: spacing.sm,
-    paddingVertical: 4,
-    borderRadius: borderRadius.full,
-  },
-  statText: { ...typography.small },
-  creator: { ...typography.small, marginTop: spacing.xs },
-  actions: {
-    flexDirection: 'row',
-    gap: spacing.sm,
-    marginHorizontal: spacing.md,
-    marginBottom: spacing.xl,
-  },
-  actionButton: {
-    flex: 1,
-    alignItems: 'center',
+  headline: { ...typography.h2, marginBottom: spacing.xs },
+  subtitle: { ...typography.small, marginBottom: spacing.md },
+  fetchButton: {
     paddingVertical: spacing.md,
     borderRadius: borderRadius.md,
-    borderWidth: 1,
+    alignItems: 'center',
   },
-  actionEmoji: { fontSize: 20, marginBottom: 4 },
-  actionLabel: { ...typography.small, fontWeight: '600' },
+  fetchButtonDisabled: { opacity: 0.6 },
+  fetchButtonText: { color: '#ffffff', fontWeight: '700', fontSize: 14 },
+  row: { flexDirection: 'row', alignItems: 'center' },
+  clipsList: { paddingHorizontal: spacing.md, paddingBottom: spacing.xl },
+  resultsLabel: { ...typography.small, marginBottom: spacing.sm, marginTop: spacing.xs },
+  clipCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: spacing.md,
+    borderRadius: borderRadius.md,
+    borderWidth: 1,
+    marginBottom: spacing.sm,
+  },
+  clipRank: { width: 36, alignItems: 'center' },
+  rankText: { fontSize: 16, fontWeight: '700' },
+  clipInfo: { flex: 1, marginLeft: spacing.sm },
+  clipTitle: { ...typography.body, fontWeight: '600', marginBottom: 4 },
+  clipMeta: { ...typography.small, marginBottom: 6 },
+  clipStats: { flexDirection: 'row', gap: spacing.xs },
+  statBadge: {
+    fontSize: 11,
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: borderRadius.full,
+    overflow: 'hidden',
+  },
+  chevron: { fontSize: 24, marginLeft: spacing.sm },
+  emptyState: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: spacing.xl,
+  },
+  emptyEmoji: { fontSize: 64, marginBottom: spacing.md },
+  emptyTitle: { ...typography.h3, textAlign: 'center', marginBottom: spacing.sm },
+  emptySubtitle: { ...typography.body, textAlign: 'center' },
+  loadingState: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.md,
+  },
+  loadingText: { ...typography.body, fontWeight: '600' },
+  loadingSubtext: { ...typography.small },
 });

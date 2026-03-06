@@ -162,7 +162,7 @@ export default function GamesScreen({ navigation }: any) {
       {clips.length > 0 ? (
         <FlatList
           data={clips}
-          keyExtractor={item => item.id}
+          keyExtractor={(item, index) => `${item.id}-${index}`}
           contentContainerStyle={styles.clipsList}
           refreshControl={
             <RefreshControl
